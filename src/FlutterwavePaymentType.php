@@ -7,6 +7,8 @@ use Flutterwave\Flutterwave;
 use Lunar\Base\DataTransferObjects\PaymentAuthorize;
 use Lunar\Base\DataTransferObjects\PaymentCapture;
 use Lunar\Base\DataTransferObjects\PaymentRefund;
+use Lunar\Events\PaymentAttemptEvent;
+use Lunar\Exceptions\Carts\CartException;
 use Lunar\Exceptions\DisallowMultipleCartOrdersException;
 use Lunar\Flutterwave\Actions\UpdateOrderFromTransaction;
 use Lunar\Flutterwave\DataTransferObjects\FlutterwaveRefund;
@@ -49,22 +51,27 @@ class FlutterwavePaymentType extends AbstractPayment
     /**
      * Authorize the payment for processing.
      */
-    final public function authorize(): PaymentAuthorize
+    final public function authorize(): ?PaymentAuthorize
     {
-        $this->orders = $this->cart->draftOrders;
+        $this->order = $this->order ?: ($this->cart->draftOrder ?: $this->cart->completedOrder);
 
-        if ($this->orders->isEmpty()){
-            $this->orders = $this->cart->completedOrders;
+        if ($this->order && $this->order->placed_at) {
+            return null;
         }
 
-        if ($this->orders->isEmpty()) {
+        if (! $this->order) {
             try {
-                $this->orders = $this->cart->createOrders();
-            } catch (DisallowMultipleCartOrdersException $e) {
-                return new PaymentAuthorize(
+                $this->order = $this->cart->createOrder();
+            } catch (DisallowMultipleCartOrdersException|CartException $e) {
+                $failure = new PaymentAuthorize(
                     success: false,
                     message: $e->getMessage(),
+                    orderId: $this->order?->id,
+                    paymentType: 'flutterwave'
                 );
+                PaymentAttemptEvent::dispatch($failure);
+
+                return $failure;
             }
         }
 
@@ -75,7 +82,7 @@ class FlutterwavePaymentType extends AbstractPayment
             return new PaymentAuthorize(
                 success: false,
                 message: $e->getMessage(),
-                orderId: $this->orders->pluck('id')->toArray(),
+                orderId: $this->order->id,
             );
         }
 
@@ -85,7 +92,7 @@ class FlutterwavePaymentType extends AbstractPayment
             return new PaymentAuthorize(
                 success: false,
                 message: "Transaction {$this->transaction->status}",
-                orderId: $this->orders->pluck('id')->toArray(),
+                orderId: $this->order->id,
             );
         }
 
@@ -104,12 +111,12 @@ class FlutterwavePaymentType extends AbstractPayment
             }
         }
 
-        $orders = UpdateOrderFromTransaction::execute($this->orders, $this->transaction);
+        $order = UpdateOrderFromTransaction::execute($this->order, $this->transaction);
 
         return new PaymentAuthorize(
-            success: (bool) $orders->first()->placed_at, //TODO: confirm if checking only one order is enough
+            success: (bool) $order->placed_at,
             message: $this->transaction->processor_response,
-            orderId: $this->orders->pluck('id')->toArray()
+            orderId: $this->order->id
         );
     }
 
@@ -152,7 +159,7 @@ class FlutterwavePaymentType extends AbstractPayment
     public function refund(Transaction $transaction, int $amount = 0, $notes = null): PaymentRefund
     {
         try {
-            $refund = (new Transactions($this->flutterwave->getConfig()))->refund($transaction->reference);
+            $refund = (new Transaction($this->flutterwave->getConfig()))->refund($transaction->reference);
         } catch (Exception $e) {
             return new PaymentRefund(
                 success: false,

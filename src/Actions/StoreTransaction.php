@@ -9,81 +9,80 @@ use Lunar\Models\Transaction;
 
 class StoreTransaction
 {
-    public function store(Collection $orders, ?\stdClass $flTransaction)
+    public function store(Order $order, ?\stdClass $flTransaction): Order
     {
         /**
          * If charges are empty, there is nothing to update.
          */
         if (is_null($flTransaction)) {
-            return $orders;
+            return $order;
         }
 
         /**
          * Get the most up-to-date transactions.
          */
-        return $orders->map(function ($order) use ($flTransaction){
-            $transactions = $order->transactions()->get();
 
-            $timestamp = now()->createFromTimestamp($flTransaction->created_at);
+        $transactions = $order->transactions()->get();
 
-            $transaction = $transactions->first(
-                fn ($t) => $t->reference == $flTransaction->id
-            ) ?: new Transaction;
+        $timestamp = now()->createFromTimestamp($flTransaction->created_at);
 
-            $type = 'capture';
+        $transaction = $transactions->first(
+            fn ($t) => $t->reference == $flTransaction->id
+        ) ?: new Transaction;
 
-            //        if ($flTransaction->amount_refunded && $flTransaction->amount_refunded < $flTransaction->amount) {
-            //            $type = 'refund';
-            //        }
+        $type = 'capture';
 
-            $paymentType = $flTransaction->payment_type;
+        //        if ($flTransaction->amount_refunded && $flTransaction->amount_refunded < $flTransaction->amount) {
+        //            $type = 'refund';
+        //        }
 
-            /**
-             * "card": {
-             * "first_6digits": "539923",
-             * "last_4digits": "2526",
-             * "issuer": "MASTERCARD FIRST BANK OF NIGERIA PLC DEBIT CARD",
-             * "country": "NG",
-             * "type": "MASTERCARD",
-             * "expiry": "01/23"
-             * }
-             */
-            $paymentDetails = $flTransaction->card ?? null;
+        $paymentType = $flTransaction->payment_type;
 
-            $lastFour = null;
-            $cardType = $paymentType;
-            $meta = [];
+        /**
+         * "card": {
+         * "first_6digits": "539923",
+         * "last_4digits": "2526",
+         * "issuer": "MASTERCARD FIRST BANK OF NIGERIA PLC DEBIT CARD",
+         * "country": "NG",
+         * "type": "MASTERCARD",
+         * "expiry": "01/23"
+         * }
+         */
+        $paymentDetails = $flTransaction->card ?? null;
 
-            if ($paymentDetails->type ?? false) {
-                $cardType = $paymentDetails->type;
-            }
+        $lastFour = null;
+        $cardType = $paymentType;
+        $meta = [];
 
-            if ($paymentDetails->last_4digits ?? false) {
-                $lastFour = $paymentDetails->last_4digits;
-            }
+        if ($paymentDetails->type ?? false) {
+            $cardType = $paymentDetails->type;
+        }
 
-            if ($flTransaction->id ?? false) {
-                $meta = array_merge($meta, (array) $flTransaction);
-            }
+        if ($paymentDetails->last_4digits ?? false) {
+            $lastFour = $paymentDetails->last_4digits;
+        }
 
-            $transaction->fill([
-                'order_id' => $order->id,
-                'success' => $flTransaction->status == FlutterwaveTransaction::STATUS_SUCCESSFUL,
-                'type' => $type,
-                'driver' => 'flutterwave',
-                'amount' => $flTransaction->amount,
-                'reference' => $flTransaction->id,
-                'status' => $flTransaction->status,
-                'notes' => $flTransaction->narration ?? null,
-                'card_type' => $cardType,
-                'last_four' => $lastFour,
-                'captured_at' => ($flTransaction->charged_amount ?? null) ? $timestamp : null,
-                'meta' => $meta,
-            ]);
+        if ($flTransaction->id ?? false) {
+            $meta = array_merge($meta, (array) $flTransaction);
+        }
 
-            $transaction->save();
+        $transaction->fill([
+            'order_id' => $order->id,
+            'success' => $flTransaction->status == FlutterwaveTransaction::STATUS_SUCCESSFUL,
+            'type' => $type,
+            'driver' => 'flutterwave',
+            'amount' => $flTransaction->amount,
+            'reference' => $flTransaction->id,
+            'status' => $flTransaction->status,
+            'notes' => $flTransaction->narration ?? null,
+            'card_type' => $cardType,
+            'last_four' => $lastFour,
+            'captured_at' => ($flTransaction->charged_amount ?? null) ? $timestamp : null,
+            'meta' => $meta,
+        ]);
 
-            return $order;
-        });
+        $transaction->save();
+
+        return $order;
     }
 }
