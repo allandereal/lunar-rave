@@ -100,6 +100,7 @@ class FlutterwavePaymentType extends AbstractPayment
             if (! ($this->cart->meta['transaction_id'] ?? null)) {
                 $this->cart->update([
                     'meta' => [
+                        ...($this->cart->meta ?? []),
                         'transaction_id' => $this->transaction->id,
                         'tx_ref' => $this->transaction->tx_ref,
                     ],
